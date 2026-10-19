@@ -31,7 +31,7 @@
   }
   .serif { font-family: Georgia, 'Times New Roman', serif; }
   header {
-    padding: env(safe-area-inset-top, 20px) 20px 16px;
+    padding: max(env(safe-area-inset-top, 0px), 16px) 20px 16px;
     border-bottom: 1px solid var(--border);
     position: sticky; top: 0; background: var(--ink); z-index: 5;
   }
@@ -173,6 +173,20 @@
   .newrow { display: flex; gap: 8px; }
   .newrow .action-btn { margin-top: 0; padding: 10px 16px; flex-shrink: 0; }
   .nopl { color: var(--text-faint); font-size: 13px; margin: 0; }
+  header .row { align-items: center; }
+  .row .right { display: flex; align-items: center; gap: 6px; }
+  #fxBtn { padding: 6px; }
+  #fxBtn.on { color: var(--accent); }
+  .sheet { max-height: 88vh; overflow-y: auto; }
+  .sheet input[type=range] { padding: 0; border: none; background: transparent; accent-color: var(--accent); height: 28px; }
+  .fx-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+  .fx-group { display: flex; flex-direction: column; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+  .fx-line { display: flex; align-items: baseline; justify-content: space-between; font-size: 14px; }
+  .fx-line span { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .fx-scale { display: flex; justify-content: space-between; color: var(--text-faint); font-size: 11px; margin-top: -4px; }
+  .fx-group .chip { align-self: flex-start; }
+  .fx-note { color: var(--text-faint); font-size: 11px; margin: 0; }
+  .fx-sep { height: 6px; }
 </style>
 </head>
 <body>
@@ -180,7 +194,12 @@
   <header>
     <div class="row">
       <h1 class="serif">Hypno Dancer</h1>
-      <span class="count" id="count">0 morceau</span>
+      <div class="right">
+        <span class="count" id="count">0 morceau</span>
+        <button type="button" class="icon" id="fxBtn" aria-label="Effets sonores">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="9" cy="7" r="2.4" fill="#181225"/><circle cx="15" cy="17" r="2.4" fill="#181225"/></svg>
+        </button>
+      </div>
     </div>
     <div class="search">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9C8CB5" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -298,6 +317,34 @@
         <input id="addNewName" placeholder="Nouvelle playlist..." maxlength="40">
         <button type="button" class="action-btn" id="addNewBtn">Créer</button>
       </div>
+    </div>
+  </div>
+
+  <div class="sheet-backdrop" id="fxBackdrop">
+    <div class="sheet">
+      <div class="head">
+        <h2>Effets sonores</h2>
+        <button type="button" id="closeFx" class="icon" aria-label="Fermer">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9C8CB5" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="fx-presets" id="fxPresets"></div>
+      <div class="fx-group">
+        <div class="fx-line"><label for="fxRate">Vitesse</label><span id="fxRateVal">1,00×</span></div>
+        <input type="range" id="fxRate" min="0.5" max="2" step="0.05" value="1">
+        <div class="fx-scale"><span>Plus lent</span><span>Plus rapide</span></div>
+        <div class="fx-sep"></div>
+        <button type="button" class="chip" id="fxPitch"></button>
+        <p class="fx-note">Quand la tonalité suit la vitesse, plus lent = plus grave et plus rapide = plus aigu, comme sur un vinyle.</p>
+      </div>
+      <div class="fx-group">
+        <div class="fx-line"><label for="fxReverb">Reverb</label><span id="fxReverbVal">0 %</span></div>
+        <input type="range" id="fxReverb" min="0" max="100" step="1" value="0">
+        <div class="fx-line"><label for="fxSize">Taille de la pièce</label><span id="fxSizeVal">2,5 s</span></div>
+        <input type="range" id="fxSize" min="0.5" max="6" step="0.1" value="2.5">
+        <div class="fx-scale"><span>Petite</span><span>Grande salle</span></div>
+      </div>
+      <button type="button" class="action-btn secondary" id="fxReset">Tout remettre à zéro</button>
     </div>
   </div>
 </div>
@@ -647,6 +694,8 @@ function startPlayback(track) {
     if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
     currentObjectUrl = URL.createObjectURL(blob);
     audioEl.src = currentObjectUrl;
+    applyRate();
+    if (fx.reverb > 0) applyReverb();
     audioEl.loop = (repeatMode === "one");
     const p = audioEl.play();
     if (p && p.catch) p.catch(() => {});
@@ -750,6 +799,171 @@ audioEl.addEventListener("ended", () => {
 });
 audioEl.addEventListener("play", () => { const t = tracks.find(x=>x.id===currentPlayingId); if (t) updatePlayerUI(t); render(); });
 audioEl.addEventListener("pause", () => { const t = tracks.find(x=>x.id===currentPlayingId); if (t) updatePlayerUI(t); render(); });
+
+/* ---------- sound effects: speed + reverb ---------- */
+const FX_DEFAULT = { rate: 1, keepPitch: true, reverb: 0, size: 2.5 };
+const FX_PRESETS = [
+  { label: "Normal", fx: { rate: 1, keepPitch: true, reverb: 0, size: 2.5 } },
+  { label: "Ralenti + reverb", fx: { rate: 0.85, keepPitch: false, reverb: 45, size: 3.5 } },
+  { label: "Accéléré", fx: { rate: 1.25, keepPitch: false, reverb: 0, size: 2.5 } },
+];
+let fx = { ...FX_DEFAULT };
+let audioCtx = null, convolver = null, dryGain = null, wetGain = null, graphReady = false, irTimer = null;
+
+function clampNum(v, min, max, fallback) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+}
+function loadFx() {
+  try {
+    const raw = JSON.parse(localStorage.getItem("hypno-fx") || "null");
+    if (raw && typeof raw === "object") {
+      fx = {
+        rate: clampNum(raw.rate, 0.5, 2, 1),
+        keepPitch: raw.keepPitch !== false,
+        reverb: clampNum(raw.reverb, 0, 100, 0),
+        size: clampNum(raw.size, 0.5, 6, 2.5),
+      };
+    }
+  } catch {}
+}
+function saveFx() {
+  try { localStorage.setItem("hypno-fx", JSON.stringify(fx)); } catch {}
+}
+function applyRate() {
+  // defaultPlaybackRate survives the change of src when the next track loads
+  audioEl.defaultPlaybackRate = fx.rate;
+  audioEl.playbackRate = fx.rate;
+  audioEl.preservesPitch = fx.keepPitch;
+  audioEl.mozPreservesPitch = fx.keepPitch;
+  audioEl.webkitPreservesPitch = fx.keepPitch;
+}
+function buildImpulse(ctx, seconds) {
+  // Synthetic room: stereo noise that fades out and gets duller over time
+  const rate = ctx.sampleRate;
+  const len = Math.max(1, Math.floor(rate * seconds));
+  const buf = ctx.createBuffer(2, len, rate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    let lp = 0;
+    for (let i = 0; i < len; i++) {
+      const t = i / len;
+      const a = 0.9 - 0.75 * t;
+      lp += ((Math.random() * 2 - 1) - lp) * a;
+      d[i] = lp * Math.pow(1 - t, 3);
+    }
+  }
+  return buf;
+}
+function ensureGraph() {
+  if (graphReady) return true;
+  try {
+    const AC = (typeof AudioContext !== "undefined") ? AudioContext
+             : (typeof webkitAudioContext !== "undefined") ? webkitAudioContext : null;
+    if (!AC) return false;
+    const ctx = new AC();
+    const dry = ctx.createGain();
+    const wet = ctx.createGain();
+    const master = ctx.createGain();
+    const conv = ctx.createConvolver();
+    conv.buffer = buildImpulse(ctx, fx.size);
+    master.gain.value = 0.9;
+    // Point of no return: once the element is routed through Web Audio it stays there
+    const src = ctx.createMediaElementSource(audioEl);
+    src.connect(dry); dry.connect(master);
+    src.connect(conv); conv.connect(wet); wet.connect(master);
+    master.connect(ctx.destination);
+    audioCtx = ctx; dryGain = dry; wetGain = wet; convolver = conv;
+    graphReady = true;
+    return true;
+  } catch { return false; }
+}
+function applyReverb() {
+  if (fx.reverb > 0 && !graphReady) {
+    if (!ensureGraph()) {
+      fx.reverb = 0;
+      saveFx();
+      showToast("La reverb n'est pas disponible sur ce téléphone.");
+      return;
+    }
+  }
+  if (!graphReady) return;
+  const m = fx.reverb / 100;
+  const now = audioCtx.currentTime;
+  dryGain.gain.setTargetAtTime(1 - 0.4 * m, now, 0.03);
+  wetGain.gain.setTargetAtTime(0.9 * m, now, 0.03);
+  if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+}
+function rebuildImpulse() {
+  if (!graphReady) return;
+  try { convolver.buffer = buildImpulse(audioCtx, fx.size); } catch {}
+}
+function fxActive() { return fx.rate !== 1 || fx.reverb > 0; }
+function fmtRate(r) { return r.toFixed(2).replace(".", ",") + "×"; }
+function fmtSize(v) { return v.toFixed(1).replace(".", ",") + " s"; }
+function samePreset(p) {
+  return p.rate === fx.rate && p.keepPitch === fx.keepPitch && p.reverb === fx.reverb && p.size === fx.size;
+}
+function setSlider(id, value) {
+  const el = document.getElementById(id);
+  if (el.value !== String(value)) el.value = String(value);
+}
+function updateFxUI() {
+  setSlider("fxRate", fx.rate);
+  setSlider("fxReverb", fx.reverb);
+  setSlider("fxSize", fx.size);
+  document.getElementById("fxRateVal").textContent = fmtRate(fx.rate);
+  document.getElementById("fxReverbVal").textContent = Math.round(fx.reverb) + " %";
+  document.getElementById("fxSizeVal").textContent = fmtSize(fx.size);
+  const kp = document.getElementById("fxPitch");
+  kp.classList.toggle("active", !fx.keepPitch);
+  kp.textContent = fx.keepPitch ? "Tonalité conservée" : "Tonalité qui suit la vitesse";
+  document.getElementById("fxBtn").classList.toggle("on", fxActive());
+  const box = document.getElementById("fxPresets");
+  box.innerHTML = "";
+  FX_PRESETS.forEach(p => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + (samePreset(p.fx) ? " active" : "");
+    b.textContent = p.label;
+    b.onclick = () => setFx(p.fx);
+    box.appendChild(b);
+  });
+}
+function setFx(next) {
+  fx = { ...next };
+  applyRate();
+  applyReverb();
+  rebuildImpulse();
+  saveFx();
+  updateFxUI();
+}
+const fxBackdrop = document.getElementById("fxBackdrop");
+document.getElementById("fxBtn").onclick = () => { updateFxUI(); fxBackdrop.classList.add("open"); };
+document.getElementById("closeFx").onclick = () => fxBackdrop.classList.remove("open");
+fxBackdrop.onclick = (e) => { if (e.target === fxBackdrop) fxBackdrop.classList.remove("open"); };
+document.getElementById("fxRate").addEventListener("input", (e) => {
+  fx.rate = clampNum(e.target.value, 0.5, 2, 1);
+  applyRate(); saveFx(); updateFxUI();
+});
+document.getElementById("fxReverb").addEventListener("input", (e) => {
+  fx.reverb = clampNum(e.target.value, 0, 100, 0);
+  applyReverb(); saveFx(); updateFxUI();
+});
+document.getElementById("fxSize").addEventListener("input", (e) => {
+  fx.size = clampNum(e.target.value, 0.5, 6, 2.5);
+  saveFx(); updateFxUI();
+  clearTimeout(irTimer);
+  irTimer = setTimeout(rebuildImpulse, 200);
+});
+document.getElementById("fxPitch").onclick = () => {
+  fx.keepPitch = !fx.keepPitch;
+  applyRate(); saveFx(); updateFxUI();
+};
+document.getElementById("fxReset").onclick = () => setFx(FX_DEFAULT);
+audioEl.addEventListener("play", () => {
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+});
 
 /* ---------- manual entry sheet ---------- */
 function renderGenrePicker() {
@@ -999,6 +1213,9 @@ document.getElementById("fileInput").addEventListener("change", async (e) => {
   ensureOrder();
   renderGenrePicker();
   setupMediaSession();
+  loadFx();
+  applyRate();
+  updateFxUI();
   updateRepeatUI();
   render();
   try {
